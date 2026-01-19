@@ -1,0 +1,1533 @@
+{
+  "name": "Multi-AI Stock Market Analysis & Prediction Agent with Discord Notifications",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "a05a2dbf-96c0-4704-84c4-f8aad4cf36d4",
+      "name": "Daily Stock Check",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [
+        -1232,
+        448
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "stockSymbols",
+              "type": "string",
+              "value": "={{ $json.stockSymbol }}"
+            },
+            {
+              "id": "id-2",
+              "name": "apiKey",
+              "type": "string",
+              "value": "d5m4blpr01qidp4js3l0d5m4blpr01qidp4js3lg"
+            },
+            {
+              "id": "id-3",
+              "name": "apiUrl",
+              "type": "string",
+              "value": "https://finnhub.io/api/v1/stock/recommendation"
+            },
+            {
+              "id": "id-4",
+              "name": "telegramChatId",
+              "type": "string",
+              "value": "<__PLACEHOLDER_VALUE__Your Telegram chat ID__>"
+            },
+            {
+              "id": "id-5",
+              "name": "newsApiKey",
+              "type": "string",
+              "value": "7WH3W5EZDWYY18VJ"
+            },
+            {
+              "id": "id-6",
+              "name": "newsApiUrl",
+              "type": "string",
+              "value": "https://www.alphavantage.co/query"
+            },
+            {
+              "id": "id-7",
+              "name": "analystRatingsApiUrl",
+              "type": "string",
+              "value": "https://finnhub.io/api/v1/stock/recommendation"
+            },
+            {
+              "id": "id-8",
+              "name": "socialSentimentApiUrl",
+              "type": "string",
+              "value": "https://api.stocktwits.com/api/2/streams/symbol"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "0129e812-588e-4998-b5aa-9ecadfaf0adf",
+      "name": "Workflow Configuration",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        -32,
+        496
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "url": "=https://query1.finance.yahoo.com/v8/finance/chart/{{ $json.stockSymbol }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "interval",
+              "value": "1d"
+            },
+            {
+              "name": "range",
+              "value": "1y"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "79bd05f5-c385-47c0-bb33-11c5605367d0",
+      "name": "Fetch Stock Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        192,
+        208
+      ],
+      "typeVersion": 4.3,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze Stock Trends (Yahoo Finance Chart Version)\nconst items = $input.all();\n\n// 1. Verificare date Yahoo\nif (!items.length || !items[0].json.chart || !items[0].json.chart.result) {\n  return [{ json: { error: \"No data from Yahoo Finance\", currentPrice: 0 } }];\n}\n\nconst result = items[0].json.chart.result[0];\nconst quote = result.indicators.quote[0];\n\n// Extragem listele de date\nconst prices = quote.close || [];\nconst volumes = quote.volume || [];\n\n// Filtrăm valorile null\nconst cleanPrices = prices.filter(p => p != null);\nconst cleanVolumes = volumes.filter(v => v != null);\n\nif (cleanPrices.length === 0) {\n   return [{ json: { error: 'Price list is empty', currentPrice: 0 } }];\n}\n\n// 2. Funcții Indicatori\nfunction calculateSMA(data, period) {\n  if (data.length < period) return 0;\n  return data.slice(-period).reduce((acc, val) => acc + val, 0) / period;\n}\n\nfunction calculateRSI(prices, period = 14) {\n  if (prices.length < period + 1) return 50;\n  let gains = 0, losses = 0;\n  for (let i = prices.length - period; i < prices.length; i++) {\n    const change = prices[i] - prices[i - 1];\n    if (change > 0) gains += change;\n    else losses += Math.abs(change);\n  }\n  if (losses === 0) return 100;\n  return 100 - (100 / (1 + (gains / losses)));\n}\n\n// 3. Calcule\nconst currentPrice = cleanPrices[cleanPrices.length - 1];\nconst sma20 = calculateSMA(cleanPrices, 20);\nconst sma50 = calculateSMA(cleanPrices, 50);\nconst sma200 = calculateSMA(cleanPrices, 200);\nconst rsi = calculateRSI(cleanPrices, 14);\n\nconst avgVol = calculateSMA(cleanVolumes, 20);\nconst curVol = cleanVolumes[cleanVolumes.length - 1];\nconst volChange = avgVol ? ((curVol - avgVol) / avgVol * 100).toFixed(2) : 0;\n\n// --- CALCUL NOU: Suport și Rezistență (Min/Max pe 50 zile) ---\nconst recentPrices = cleanPrices.slice(-50); // Luăm ultimele 50 de zile\nconst support = Math.min(...recentPrices);\nconst resistance = Math.max(...recentPrices);\n\n// 4. Trend\nlet trend = 'Neutral';\nif (sma20 && sma50) {\n  if (currentPrice > sma20 && sma20 > sma50) trend = 'Bullish';\n  else if (currentPrice < sma20 && sma20 < sma50) trend = 'Bearish';\n}\n\n// 5. RSI Signal\nlet rsiSignal = 'Neutral';\nif (rsi > 70) rsiSignal = 'Overbought';\nelse if (rsi < 30) rsiSignal = 'Oversold';\n\n// 6. Output Final\nconst analysis = {\n  stockSymbol: result.meta.symbol,\n  currentPrice: currentPrice,\n  historicalPrices: cleanPrices,\n  movingAverages: {\n    sma20: sma20.toFixed(2),\n    sma50: sma50.toFixed(2),\n    sma200: sma200.toFixed(2)\n  },\n  rsi: rsi.toFixed(2),\n  rsiSignal: rsiSignal,\n  volumeTrend: {\n    current: curVol,\n    percentChange: volChange + '%',\n    signal: volChange > 50 ? 'High Volume' : 'Normal'\n  },\n  // AICI ADĂUGĂM DATELE CARE LIPSEAU:\n  supportLevels: [support.toFixed(2)], \n  resistanceLevels: [resistance.toFixed(2)],\n  \n  overallTrend: trend,\n  timestamp: new Date().toISOString()\n};\n\nreturn [{ json: analysis }];"
+      },
+      "id": "fb0ae885-5f45-42d2-9bd9-62059ae85ce8",
+      "name": "Analyze Stock Trends",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        416,
+        208
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Predict Future Trends using Simple Linear Regression\n// This code analyzes historical stock data and generates buy/sell/hold recommendations\n\nconst items = $input.all();\n\n// Helper function to perform simple linear regression\nfunction linearRegression(data) {\n  const n = data.length;\n  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;\n  \n  data.forEach((point, index) => {\n    const x = index;\n    const y = point;\n    sumX += x;\n    sumY += y;\n    sumXY += x * y;\n    sumX2 += x * x;\n  });\n  \n  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);\n  const intercept = (sumY - slope * sumX) / n;\n  \n  return { slope, intercept };\n}\n\n// Helper function to predict future values\nfunction predictFuture(regression, currentIndex, daysAhead) {\n  const predictions = [];\n  for (let i = 1; i <= daysAhead; i++) {\n    const futureIndex = currentIndex + i;\n    const predictedValue = regression.slope * futureIndex + regression.intercept;\n    predictions.push(predictedValue);\n  }\n  return predictions;\n}\n\n// Helper function to generate recommendation\nfunction generateRecommendation(slope, predictions, currentPrice) {\n  const avgPrediction = predictions.reduce((a, b) => a + b, 0) / predictions.length;\n  const priceChange = ((avgPrediction - currentPrice) / currentPrice) * 100;\n  \n  let recommendation = 'HOLD';\n  let confidence = 'Medium';\n  \n  if (slope > 0 && priceChange > 5) {\n    recommendation = 'BUY';\n    confidence = priceChange > 10 ? 'High' : 'Medium';\n  } else if (slope < 0 && priceChange < -5) {\n    recommendation = 'SELL';\n    confidence = priceChange < -10 ? 'High' : 'Low';\n  }\n  \n  return { recommendation, confidence, priceChange: priceChange.toFixed(2) };\n}\n\n// Process each item\nconst results = items.map(item => {\n  const stockData = item.json;\n  \n  // Extract historical prices (assuming they're in the data)\n  const historicalPrices = stockData.historicalPrices || [];\n  const currentPrice = stockData.currentPrice || historicalPrices[historicalPrices.length - 1];\n  \n  // Perform linear regression\n  const regression = linearRegression(historicalPrices);\n  \n  // Predict next 7 days\n  const predictions = predictFuture(regression, historicalPrices.length - 1, 7);\n  \n  // Generate recommendation\n  const analysis = generateRecommendation(regression.slope, predictions, currentPrice);\n  \n  return {\n    json: {\n      ...stockData,\n      prediction: {\n        trend: regression.slope > 0 ? 'Upward' : regression.slope < 0 ? 'Downward' : 'Stable',\n        slope: regression.slope.toFixed(4),\n        predictions: predictions.map(p => p.toFixed(2)),\n        recommendation: analysis.recommendation,\n        confidence: analysis.confidence,\n        expectedPriceChange: analysis.priceChange + '%',\n        currentPrice: currentPrice,\n        predictedPrice7Days: predictions[6].toFixed(2)\n      }\n    }\n  };\n});\n\nreturn results;"
+      },
+      "id": "2b2cc813-ce54-4125-890c-2d54ae559733",
+      "name": "Predict Future Trends",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        608,
+        208
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "message",
+              "type": "string",
+              "value": "=📊 **Stock Analysis Report**\n\n**Symbol:** {{ $json.rawData.technical.stockSymbol }}\n**Current Price:** ${{ $json.rawData.technical.currentPrice }}\n**Timestamp:** {{ $json.rawData.technical.timestamp }}\n\n━━━━━━━━━━━━━━━━━━━━\n📈 **Technical Analysis**\n━━━━━━━━━━━━━━━━━━━━\n\n**Moving Averages:**\n• SMA 20: ${{ $json.rawData.technical.movingAverages.sma20 }}\n• SMA 50: ${{ $json.rawData.technical.movingAverages.sma50 }}\n• SMA 200: ${{ $json.rawData.technical.movingAverages.sma200 }}\n\n**RSI (14):** {{ $json.rawData.technical.rsi }} - {{ $json.rawData.technical.rsiSignal }}\n\n**Volume Analysis:**\n• Current: {{ $json.rawData.technical.volumeTrend.current }}\n• Change: {{ $json.rawData.technical.volumeTrend.percentChange }}\n• Signal: {{ $json.rawData.technical.volumeTrend.signal }}\n\n**Support Levels:** {{ $json.rawData.technical.supportLevels.join(', ') }}\n**Resistance Levels:** {{ $json.rawData.technical.resistanceLevels.join(', ') }}\n\n**Overall Trend:** {{ $json.rawData.technical.overallTrend }}\n\n━━━━━━━━━━━━━━━━━━━━\n🔮 **Price Prediction**\n━━━━━━━━━━━━━━━━━━━━\n\n**Trend Direction:** {{ $json.rawData.technical.prediction.trend }}\n**Slope:** {{ $json.rawData.technical.prediction.slope }}\n**7-Day Forecast:** ${{ $json.rawData.technical.prediction.predictedPrice7Days }}\n**Expected Change:** {{ $json.rawData.technical.prediction.expectedPriceChange }}\n\n━━━━━━━━━━━━━━━━━━━━\n📰 **News Sentiment**\n━━━━━━━━━━━━━━━━━━━━\n**Score:** {{ $json.rawData.news.sentimentScore || $json.rawData.news.score || 'N/A' }}\n**Summary:** {{ $json.rawData.news.summary || $json.rawData.news.sentimentSummary || 'No news summary available' }}\n\n━━━━━━━━━━━━━━━━━━━━\n👔 **Analyst Ratings**\n━━━━━━━━━━━━━━━━━━━━\n**Consensus:** {{ $json.rawData.analyst.analystRatings.consensus.rating }}\n**Buy:** {{ $json.rawData.analyst.analystRatings.summary.buyPercent }} | **Sell:** {{ $json.rawData.analyst.analystRatings.summary.sellPercent }}\n**Total Analysts:** {{ $json.rawData.analyst.analystRatings.summary.totalAnalysts }}\n\n━━━━━━━━━━━━━━━━━━━━\n💬 **Social Media Sentiment**\n━━━━━━━━━━━━━━━━━━━━\n**Mood:** {{ $json.rawData.social.communityMood }}\n**Score:** {{ $json.rawData.social.sentimentScore }}\n**Posts Analyzed:** {{ $json.rawData.social.totalPosts }}\n\n━━━━━━━━━━━━━━━━━━━━\n🎯 **FINAL RECOMMENDATION**\n━━━━━━━━━━━━━━━━━━━━\n\n**Action:** {{ $json.recommendation }}\n**Confidence Score:** {{ $json.confidenceScore }}%\n\n**Summary:**\n{{ $json.summary }}\n\n━━━━━━━━━━━━━━━━━━━━\n⚠️ *Disclaimer: This is automated analysis for informational purposes only. Always do your own research before making investment decisions.*"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "26e92274-1c9f-418f-ba06-03cb55ba0836",
+      "name": "Format Telegram Message",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1968,
+        592
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Workflow Configuration').first().json.newsApiUrl }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $('Workflow Configuration').first().json.stockSymbols }}"
+            },
+            {
+              "name": "apiKey",
+              "value": "={{ $('Workflow Configuration').first().json.newsApiKey }}"
+            },
+            {
+              "name": "function",
+              "value": "NEWS_SENTIMENT"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "454cc200-d5a8-4aa7-8aa2-9e589cf5fe8e",
+      "name": "Fetch News Sentiment",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        304,
+        64
+      ],
+      "typeVersion": 4.3
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Workflow Configuration').first().json.analystRatingsApiUrl }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.stockSymbol }}"
+            },
+            {
+              "name": "token",
+              "value": "=d5m4blpr01qidp4js3l0d5m4blpr01qidp4js3lg"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "db098047-7244-4bb4-af86-b6741581cf46",
+      "name": "Fetch Analyst Ratings",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        416,
+        592
+      ],
+      "typeVersion": 4.3,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze News Sentiment (Yahoo Finance RSS Version)\nconst items = $input.all();\n\n// Verificăm dacă avem știri\nif (!items || items.length === 0) {\n  return [{ json: { score: 0, summary: \"No news found\", sentimentSummary: \"Neutral\" } }];\n}\n\nlet score = 0;\nlet validArticles = 0;\n\n// Cuvinte cheie pentru sentiment (Listă extinsă)\nconst positiveWords = ['gain', 'up', 'buy', 'bull', 'profit', 'rise', 'growth', 'high', 'surge', 'record', 'beat', 'strong'];\nconst negativeWords = ['loss', 'down', 'sell', 'bear', 'drop', 'crash', 'weak', 'low', 'miss', 'fall', 'cut', 'debt'];\n\n// Yahoo returnează titlul în 'title' și descrierea în 'contentSnippet'\n// Analizăm ultimele 10 articole pentru a prinde pulsul pieței\nconst recentArticles = items.slice(0, 10);\n\nrecentArticles.forEach(item => {\n  const title = (item.json.title || \"\").toLowerCase();\n  const desc = (item.json.contentSnippet || \"\").toLowerCase();\n  const fullText = title + \" \" + desc;\n  \n  let articleScore = 0;\n  \n  positiveWords.forEach(w => { if (fullText.includes(w)) articleScore += 1; });\n  negativeWords.forEach(w => { if (fullText.includes(w)) articleScore -= 1; });\n  \n  score += articleScore;\n  validArticles++;\n});\n\n// Normalizăm scorul (-1 la 1)\n// Împărțim la numărul de articole * un factor de amortizare\nconst normalizedScore = validArticles > 0 ? Math.max(-1, Math.min(1, score / (validArticles * 1.5))) : 0;\n\nlet mood = 'Neutral';\nif (normalizedScore > 0.15) mood = 'Bullish';\nif (normalizedScore < -0.15) mood = 'Bearish';\n\nreturn [{\n  json: {\n    sentimentScore: normalizedScore.toFixed(2),\n    summary: `${mood} sentiment based on Yahoo Finance stories.`,\n    overallSentiment: mood,\n    // Variabile critice pentru nodul final\n    score: normalizedScore.toFixed(2), \n    sentimentSummary: `${mood} (${normalizedScore.toFixed(2)})`\n  }\n}];"
+      },
+      "id": "24597273-34d2-4449-b0cc-b6b02cda56ad",
+      "name": "Analyze News Sentiment",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        608,
+        400
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process Analyst Ratings (Fixed for Scoring)\nconst items = $input.all();\n\n// 1. Verificăm datele (Finnhub)\nif (!items || items.length === 0 || !items[0].json) {\n  return [{ json: { analystRatings: { consensus: { rating: 'N/A' } }, buyRatio: 0, sellRatio: 0 } }];\n}\n\n// Finnhub poate returna array sau obiect\nconst data = Array.isArray(items[0].json) ? items[0].json[0] : items[0].json;\n\nif (!data) {\n   return [{ json: { error: \"No ratings data found\", buyRatio: 0, sellRatio: 0 } }];\n}\n\n// 2. Extragem Cifrele\nconst buy = data.buy || 0;\nconst strongBuy = data.strongBuy || 0;\nconst hold = data.hold || 0;\nconst sell = data.sell || 0;\nconst strongSell = data.strongSell || 0;\n\nconst totalBuy = buy + strongBuy;\nconst totalSell = sell + strongSell;\nconst total = totalBuy + hold + totalSell;\n\n// 3. Calculăm Rațiile (Aici era problema - le calculăm ca numere simple 0.x)\nconst buyRatio = total > 0 ? (totalBuy / total) : 0;\nconst sellRatio = total > 0 ? (totalSell / total) : 0;\n\n// Calculăm Consensul\nlet consensus = 'Hold';\nif (total > 0) {\n  if (totalBuy > totalSell && totalBuy > hold) consensus = 'Buy';\n  if (totalSell > totalBuy && totalSell > hold) consensus = 'Sell';\n}\n\n// 4. Returnăm obiectul în formatul pe care îl așteaptă ȘI Telegram, ȘI Calculatorul de Scor\nreturn [{\n  json: {\n    // Acestea 2 sunt pentru nodul \"Generate Comprehensive Recommendation\"\n    buyRatio: buyRatio,\n    sellRatio: sellRatio,\n    \n    // Acesta este pentru afișarea textului frumos\n    analystRatings: {\n      summary: {\n        totalAnalysts: total,\n        buyRatings: totalBuy,\n        holdRatings: hold,\n        sellRatings: totalSell,\n        buyPercent: (buyRatio * 100).toFixed(0) + '%',\n        sellPercent: (sellRatio * 100).toFixed(0) + '%'\n      },\n      consensus: {\n        rating: consensus,\n        confidence: total > 10 ? 'High' : 'Medium'\n      },\n      timestamp: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "id": "7af328e6-1798-4384-877c-c1c5ee141525",
+      "name": "Process Analyst Ratings",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        608,
+        608
+      ],
+      "typeVersion": 2,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze Social Sentiment (RSS Version)\nconst items = $input.all();\n\n// Dacă RSS-ul nu a găsit nimic\nif (!items || items.length === 0) {\n  return [{ json: { sentimentScore: 0, communityMood: 'Neutral', totalPosts: 0, sentiment: 'Neutral' } }];\n}\n\nlet totalSentiment = 0;\nlet postCount = 0;\n\n// Analizăm titlurile din RSS\nitems.forEach(item => {\n  const title = item.json.title || \"\";\n  const snippet = item.json.contentSnippet || \"\";\n  const text = (title + \" \" + snippet).toLowerCase();\n  \n  // Cuvinte cheie simple\n  if (text.includes('bull') || text.includes('buy') || text.includes('moon') || text.includes('up')) totalSentiment++;\n  if (text.includes('bear') || text.includes('sell') || text.includes('crash') || text.includes('drop')) totalSentiment--;\n  \n  postCount++;\n});\n\n// Calculăm media\nconst avg = postCount > 0 ? totalSentiment / postCount : 0;\nlet mood = 'Neutral';\nif (avg > 0.1) mood = 'Bullish';\nif (avg < -0.1) mood = 'Bearish';\n\n// Returnăm UN SINGUR obiect rezumat (esențial pentru nodul Combine!)\nreturn [{\n  json: {\n    sentimentScore: avg.toFixed(2),\n    communityMood: mood,\n    totalPosts: postCount,\n    sentiment: mood\n  }\n}];"
+      },
+      "id": "5f253294-9baf-4b45-91e6-7e4bb9c46514",
+      "name": "Analyze Social Sentiment",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        624,
+        800
+      ],
+      "typeVersion": 2,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "id": "28968d33-a1ab-40e4-8298-f09d4e5e5237",
+      "name": "Combine All Analysis",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        832,
+        560
+      ],
+      "typeVersion": 3.2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate Comprehensive Recommendation (Fixed Labels & Syntax)\nconst items = $input.all();\n\nif (!items || items.length === 0) {\n  return [{ json: { error: 'No data available for analysis' } }];\n}\n\n// Extragem datele de la cele 4 surse\nconst technicalAnalysis = items[0]?.json || {};\nconst newsSentiment = items[1]?.json || {};\nconst analystRatings = items[2]?.json || {};\nconst socialSentiment = items[3]?.json || {};\n\n// Definim ponderile (Cât contează fiecare)\nconst WEIGHTS = {\n  technical: 0.35,\n  news: 0.25,\n  analyst: 0.25,\n  social: 0.15\n};\n\n// Funcție de calcul scor (-100 la 100)\nfunction convertToScore(data, type) {\n  let score = 0;\n  \n  switch(type) {\n    case 'technical':\n      if (data.overallTrend === 'Bullish') score += 40;\n      else if (data.overallTrend === 'Bearish') score -= 40;\n      \n      if (data.rsiSignal === 'Oversold') score += 30;\n      else if (data.rsiSignal === 'Overbought') score -= 30;\n      \n      if (data.prediction?.recommendation === 'BUY') score += 30;\n      else if (data.prediction?.recommendation === 'SELL') score -= 30;\n      break;\n      \n    case 'news':\n      // Yahoo News dă un scor -1 la 1\n      const newsScore = parseFloat(data.sentimentScore || 0);\n      score = newsScore * 100; \n      break;\n      \n    case 'analyst':\n      // Finnhub dă rații 0 la 1\n      const buyRatio = data.buyRatio || 0;\n      const sellRatio = data.sellRatio || 0;\n      score = (buyRatio - sellRatio) * 100;\n      break;\n      \n    case 'social':\n      // Reddit\n      const socialScore = parseFloat(data.sentimentScore || 0);\n      score = socialScore * 100;\n      break;\n  }\n  \n  return Math.max(-100, Math.min(100, score));\n}\n\n// Calculăm scorurile individuale\nconst technicalScore = convertToScore(technicalAnalysis, 'technical');\nconst newsScore = convertToScore(newsSentiment, 'news');\nconst analystScore = convertToScore(analystRatings, 'analyst');\nconst socialScore = convertToScore(socialSentiment, 'social');\n\n// Calculăm scorul final compus\nconst compositeScore = (\n  technicalScore * WEIGHTS.technical +\n  newsScore * WEIGHTS.news +\n  analystScore * WEIGHTS.analyst +\n  socialScore * WEIGHTS.social\n);\n\n// Determinăm Recomandarea Finală\nlet recommendation = 'HOLD';\nlet confidence = 'Medium';\n\nif (compositeScore > 40) {\n  recommendation = 'STRONG BUY';\n  confidence = 'High';\n} else if (compositeScore > 20) {\n  recommendation = 'BUY';\n  confidence = 'Medium';\n} else if (compositeScore < -40) {\n  recommendation = 'STRONG SELL';\n  confidence = 'High';\n} else if (compositeScore < -20) {\n  recommendation = 'SELL';\n  confidence = 'Medium';\n} else {\n  recommendation = 'HOLD';\n  confidence = compositeScore > -10 && compositeScore < 10 ? 'High' : 'Medium';\n}\n\n// Extragem etichetele corecte pentru text\nconst techTrend = technicalAnalysis.overallTrend || 'Neutral';\nconst newsMood = newsSentiment.overallSentiment || newsSentiment.sentiment || 'Neutral';\n// Verificare extra pentru analystConsensus ca să nu dea eroare dacă lipsește structura\nconst analystConsensus = (analystRatings.analystRatings && analystRatings.analystRatings.consensus) ? analystRatings.analystRatings.consensus.rating : 'N/A';\nconst socialMood = socialSentiment.communityMood || socialSentiment.sentiment || 'Neutral';\n\n// Generăm textul rezumat\nconst summaryText = `\nBased on comprehensive analysis:\n- Technical Analysis: ${techTrend} (Score: ${technicalScore.toFixed(0)})\n- News Sentiment: ${newsMood} (Score: ${newsScore.toFixed(0)})\n- Analyst Ratings: ${analystConsensus} (Score: ${analystScore.toFixed(0)})\n- Social Sentiment: ${socialMood} (Score: ${socialScore.toFixed(0)})\n\nComposite Score: ${compositeScore.toFixed(2)}/100\n`;\n\n// Returnăm rezultatul final\nreturn [{\n  json: {\n    recommendation: recommendation,\n    confidence: confidence,\n    confidenceScore: Math.abs(compositeScore).toFixed(2),\n    compositeScore: compositeScore.toFixed(2),\n    summary: summaryText,\n    timestamp: new Date().toISOString(),\n    // Păstrăm datele brute pentru Discord\n    rawData: {\n      technical: technicalAnalysis,\n      news: newsSentiment,\n      analyst: analystRatings,\n      social: socialSentiment\n    }\n  }\n}];"
+      },
+      "id": "72b3f1fc-b655-418c-b602-008f262f1b82",
+      "name": "Generate Comprehensive Recommendation",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        992,
+        592
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "6d492f36-b8a6-4d29-b20a-12a5490a7b31",
+      "name": "Google Gemini Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "position": [
+        1424,
+        1232
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "chatInput",
+              "type": "string",
+              "value": "=You are a financial analysis validator. Review the following stock analysis recommendation and provide your independent assessment. Analyze the data objectively and determine if you agree or disagree with the recommendation. Provide your reasoning.\n\nStock Symbol: {{ $json.rawData.technical.stockSymbol }}\nCurrent Price: ${{ $json.rawData.technical.currentPrice }}\n\nRecommendation: {{ $json.recommendation }}\nConfidence: {{ $json.confidence }}\nComposite Score: {{ $json.compositeScore }}\n\nTechnical Analysis:\n- Trend: {{ $json.rawData.technical.overallTrend }}\n- RSI: {{ $json.rawData.technical.rsi }} ({{ $json.rawData.technical.rsiSignal }})\n- Moving Averages: SMA20=${{ $json.rawData.technical.movingAverages.sma20 }}, SMA50=${{ $json.rawData.technical.movingAverages.sma50 }}\n\nNews Sentiment: {{ $json.rawData.news.overallSentiment }} (Score: {{ $json.rawData.news.sentimentScore }})\nAnalyst Ratings: {{ $json.rawData.analyst.analystRatings.consensus.rating }}\nSocial Sentiment: {{ $json.rawData.social.communityMood }}\n\nProvide your verdict in this format:\nVERDICT: [AGREE/DISAGREE/NEUTRAL]\nCONFIDENCE: [High/Medium/Low]\nREASONING: [Your detailed analysis]"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "1d04804c-584e-4594-a7a7-8f5374daa9cf",
+      "name": "Prepare AI Validation Input",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1184,
+        800
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "jsCode": "// Evaluate AI Consensus (Gemini Text Parser Fixed)\nconst items = $input.all();\n\n// 1. Luăm recomandarea originală (pe care Gemini a analizat-o)\n// Trebuie să accesăm datele din nodul care a generat semnalul inițial\nconst originalData = $('Generate Comprehensive Recommendation').first().json;\nconst originalRec = originalData.recommendation || 'HOLD';\n\n// 2. Extragem textul generat de Gemini\nif (!items || items.length === 0 || !items[0].json.text) {\n  return [{ json: { error: 'No response from Gemini' } }];\n}\nconst geminiText = items[0].json.text;\n\n// 3. Funcție care caută Verdictul și Încrederea în text\nfunction extractValue(text, key) {\n  // Caută ceva de genul \"VERDICT: [AGREE]\" sau \"VERDICT: AGREE\"\n  const regex = new RegExp(`${key}:\\\\s*(?:\\\\[)?([^\\\\]\\\\n]+)(?:\\\\])?`, 'i');\n  const match = text.match(regex);\n  return match ? match[1].trim().toUpperCase() : 'NEUTRAL';\n}\n\nconst verdict = extractValue(geminiText, 'VERDICT'); \nconst confidenceStr = extractValue(geminiText, 'CONFIDENCE');\n\n// 4. Transformăm textul în cifre\nlet confidenceScore = 0;\nif (confidenceStr.includes('HIGH')) confidenceScore = 95;\nelse if (confidenceStr.includes('MEDIUM')) confidenceScore = 60;\nelse if (confidenceStr.includes('LOW')) confidenceScore = 30;\nelse confidenceScore = 0;\n\n// 5. Interpretăm Verdictul (AGREE = Păstrăm semnalul, DISAGREE = Trecem pe HOLD)\nlet finalRec = 'HOLD';\nif (verdict.includes('AGREE')) {\n    finalRec = originalRec;\n} else if (verdict.includes('DISAGREE')) {\n    finalRec = 'HOLD (Validator Disagreed)';\n} else {\n    finalRec = originalRec; // Dacă e neutru, păstrăm originalul\n}\n\n// 6. Construim pachetul final pentru Discord\nconst result = {\n  consensusRecommendation: finalRec,\n  consensusScore: confidenceScore,\n  agreementLevel: verdict.includes('AGREE') ? 'Validated' : 'Dispute',\n  averageConfidence: confidenceScore.toFixed(2),\n  \n  // Lista de validatori (Aici e doar Gemini acum)\n  aiRecommendations: [{\n    model: 'Gemini Ultra',\n    recommendation: verdict, // Arată dacă a fost de acord sau nu\n    confidence: confidenceStr\n  }],\n  \n  summary: `Gemini Analysis: ${verdict} with the initial signal. Confidence level is ${confidenceStr}.`,\n  timestamp: new Date().toISOString()\n};\n\nreturn [{ json: result }];"
+      },
+      "id": "4485b3ef-6e65-48ed-b485-da49321c6dc9",
+      "name": "Evaluate AI Consensus",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1808,
+        800
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "batching": {}
+      },
+      "id": "58ea6742-b61f-4fb3-90b1-3d934a0538e8",
+      "name": "AI Validator 3 - Gemini",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "position": [
+        1424,
+        976
+      ],
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "guildId": {
+          "__rl": true,
+          "value": "1462396100165243048",
+          "mode": "id"
+        },
+        "channelId": {
+          "__rl": true,
+          "value": "1462403921527046215",
+          "mode": "id"
+        },
+        "content": "={{ $json.message }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        2208,
+        592
+      ],
+      "id": "12805095-31e9-4f43-a1ff-83c29578914b",
+      "name": "Send a message",
+      "webhookId": "60f40ee7-e106-474f-83cc-9a8426deff41",
+      "credentials": {
+        "discordBotApi": {
+          "id": "ZQL9MvvHi103Avgx",
+          "name": "Discord Bot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "guildId": {
+          "__rl": true,
+          "value": "1462396100165243048",
+          "mode": "id"
+        },
+        "channelId": {
+          "__rl": true,
+          "value": "1462403921527046215",
+          "mode": "id"
+        },
+        "content": "={{ $('AI Consensus').item.json.message }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        816
+      ],
+      "id": "4115bb12-64d6-45c9-b3f8-f6a48db8a92e",
+      "name": "Send a message1",
+      "webhookId": "60f40ee7-e106-474f-83cc-9a8426deff41",
+      "credentials": {
+        "discordBotApi": {
+          "id": "ZQL9MvvHi103Avgx",
+          "name": "Discord Bot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a7072584-ccb9-4bdf-8784-c45fff109840",
+              "name": "message",
+              "value": "=🤖 **AI Consensus Validation**\n\n**Final Verdict:** {{ $json.consensusRecommendation }}\n**Agreement Level:** {{ $json.agreementLevel }}\n**Avg Confidence:** {{ $json.averageConfidence }}%\n\n━━━━━━━━━━━━━━━━━━━━\n🧠 **Model Breakdown**\n━━━━━━━━━━━━━━━━━━━━\n{{ $json.aiRecommendations.map(r => `• **${r.model}:** ${r.recommendation} (Conf: ${r.confidence})`).join('\\n') }}\n\n━━━━━━━━━━━━━━━━━━━━\n📝 **Summary**\n{{ $json.summary }}\n\n━━━━━━━━━━━━━━━━━━━━\n🕒 *Validated at:* {{ $json.timestamp }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2016,
+        816
+      ],
+      "id": "94ef314e-7f8b-4057-a0c4-92008eec48a6",
+      "name": "AI Consensus"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "guildId": {
+          "__rl": true,
+          "value": "1462396100165243048",
+          "mode": "id"
+        },
+        "channelId": {
+          "__rl": true,
+          "value": "1462403921527046215",
+          "mode": "id"
+        },
+        "limit": 1,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        -1104,
+        1536
+      ],
+      "id": "4aa49c06-6996-443e-9886-a458c5fc70bd",
+      "name": "Get many messages",
+      "webhookId": "70e9d99d-a6af-4450-b4a9-c60e31988ec9",
+      "credentials": {
+        "discordBotApi": {
+          "id": "ZQL9MvvHi103Avgx",
+          "name": "Discord Bot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// LISTA TA DE MONITORIZARE ZILNICĂ\n// Adaugă aici simbolurile pe care vrei să le primești automat dimineața\nconst myStocks = ['MSFT', 'SOFI'];\n\n// n8n va rula automat tot fluxul pentru fiecare simbol din această listă\nreturn myStocks.map(symbol => {\n  return {\n    json: {\n      stockSymbol: symbol,\n      source: 'daily_report' // Ca să știm că e raportul de dimineață\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        448
+      ],
+      "id": "00082d99-8e10-4852-a503-bc2feaf3ebb1",
+      "name": "My List"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Setări\nconst lookBackSeconds = 70; // Ne uităm în urmă 70 secunde (marjă de siguranță pt delay)\n\n// Mesajele vin ca o listă de la Discord\nconst messages = $input.all();\nconst foundStocks = [];\n\n// Timpul curent în milisecunde\nconst now = new Date().getTime();\n\nmessages.forEach(item => {\n    const msg = item.json;\n    \n    // Convertim timpul mesajului Discord în milisecunde\n    const msgTime = new Date(msg.timestamp).getTime();\n    \n    // Calculăm cât timp a trecut de la mesaj (în secunde)\n    const diffSeconds = (now - msgTime) / 1000;\n    \n  // Verificam daca a fost trimis de bot\n    const isBot =\n      msg.bot === true ||\n      msg.author?.bot === true;\n\n    // 1. FILTRU DE TIMP: Mesaj mai nou de ~1 minut\n    // 2. FILTRU DE BOT: Ignorăm mesajele botului\n    if (diffSeconds < lookBackSeconds && !isBot) {\n        \n        const content = msg.content;\n        \n        // 3. REGEX: Căutăm Ticker CAPS (ex: PLTR)\n        const regex = /\\b[A-Z]{2,5}\\b/;\n        const match = content.match(regex);\n        \n        if (match) {\n            foundStocks.push({\n                json: {\n                    stockSymbols: match[0], // Folosim numele exact pe care îl așteaptă config\n                    stockSymbol: match[0],  // Backup\n                    source: 'chat_request'\n                }\n            });\n        }\n    }\n});\n\nreturn foundStocks;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -528,
+        1584
+      ],
+      "id": "62ae446b-ad5c-4ddd-8916-2b62c600c437",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "url": "=https://finance.yahoo.com/rss/headline?s={{ $json.stockSymbol }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        416,
+        400
+      ],
+      "id": "0a9feefc-60f5-465c-aed3-a3c093866dd0",
+      "name": "News",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "=https://www.reddit.com/r/stocks/search.rss?q={{ $json.stockSymbol }}&restrict_sr=1&sort=new&limit=20",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        416,
+        784
+      ],
+      "id": "9abe8e87-fa44-4cd3-92fd-1ce57034aaf7",
+      "name": "Reddit",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -384,
+        464
+      ],
+      "id": "849ae53e-7533-45a0-a180-3064438b08fa",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1392,
+        1568
+      ],
+      "id": "d8564363-5348-4d69-b29d-ba7283f52755",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "stockSymbols",
+              "type": "string",
+              "value": "={{ $json.stockSymbol }}"
+            },
+            {
+              "id": "id-2",
+              "name": "apiKey",
+              "type": "string",
+              "value": "d5m4blpr01qidp4js3l0d5m4blpr01qidp4js3lg"
+            },
+            {
+              "id": "id-3",
+              "name": "apiUrl",
+              "type": "string",
+              "value": "https://finnhub.io/api/v1/stock/recommendation"
+            },
+            {
+              "id": "id-4",
+              "name": "telegramChatId",
+              "type": "string",
+              "value": "<__PLACEHOLDER_VALUE__Your Telegram chat ID__>"
+            },
+            {
+              "id": "id-5",
+              "name": "newsApiKey",
+              "type": "string",
+              "value": "7WH3W5EZDWYY18VJ"
+            },
+            {
+              "id": "id-6",
+              "name": "newsApiUrl",
+              "type": "string",
+              "value": "https://www.alphavantage.co/query"
+            },
+            {
+              "id": "id-7",
+              "name": "analystRatingsApiUrl",
+              "type": "string",
+              "value": "https://finnhub.io/api/v1/stock/recommendation"
+            },
+            {
+              "id": "id-8",
+              "name": "socialSentimentApiUrl",
+              "type": "string",
+              "value": "https://api.stocktwits.com/api/2/streams/symbol"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "eebbc9fb-e82b-41c0-a9d2-9183e9fae0b1",
+      "name": "Workflow Configuration1",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        -208,
+        1568
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "url": "=https://query1.finance.yahoo.com/v8/finance/chart/{{ $json.stockSymbol }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "interval",
+              "value": "1d"
+            },
+            {
+              "name": "range",
+              "value": "1y"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "585207f9-5707-4e61-bfb7-d1b311ce3cd0",
+      "name": "Fetch Stock Data1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        48,
+        1200
+      ],
+      "typeVersion": 4.3,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze Stock Trends (Yahoo Finance Chart Version)\nconst items = $input.all();\n\n// 1. Verificare date Yahoo\nif (!items.length || !items[0].json.chart || !items[0].json.chart.result) {\n  return [{ json: { error: \"No data from Yahoo Finance\", currentPrice: 0 } }];\n}\n\nconst result = items[0].json.chart.result[0];\nconst quote = result.indicators.quote[0];\n\n// Extragem listele de date\nconst prices = quote.close || [];\nconst volumes = quote.volume || [];\n\n// Filtrăm valorile null\nconst cleanPrices = prices.filter(p => p != null);\nconst cleanVolumes = volumes.filter(v => v != null);\n\nif (cleanPrices.length === 0) {\n   return [{ json: { error: 'Price list is empty', currentPrice: 0 } }];\n}\n\n// 2. Funcții Indicatori\nfunction calculateSMA(data, period) {\n  if (data.length < period) return 0;\n  return data.slice(-period).reduce((acc, val) => acc + val, 0) / period;\n}\n\nfunction calculateRSI(prices, period = 14) {\n  if (prices.length < period + 1) return 50;\n  let gains = 0, losses = 0;\n  for (let i = prices.length - period; i < prices.length; i++) {\n    const change = prices[i] - prices[i - 1];\n    if (change > 0) gains += change;\n    else losses += Math.abs(change);\n  }\n  if (losses === 0) return 100;\n  return 100 - (100 / (1 + (gains / losses)));\n}\n\n// 3. Calcule\nconst currentPrice = cleanPrices[cleanPrices.length - 1];\nconst sma20 = calculateSMA(cleanPrices, 20);\nconst sma50 = calculateSMA(cleanPrices, 50);\nconst sma200 = calculateSMA(cleanPrices, 200);\nconst rsi = calculateRSI(cleanPrices, 14);\n\nconst avgVol = calculateSMA(cleanVolumes, 20);\nconst curVol = cleanVolumes[cleanVolumes.length - 1];\nconst volChange = avgVol ? ((curVol - avgVol) / avgVol * 100).toFixed(2) : 0;\n\n// --- CALCUL NOU: Suport și Rezistență (Min/Max pe 50 zile) ---\nconst recentPrices = cleanPrices.slice(-50); // Luăm ultimele 50 de zile\nconst support = Math.min(...recentPrices);\nconst resistance = Math.max(...recentPrices);\n\n// 4. Trend\nlet trend = 'Neutral';\nif (sma20 && sma50) {\n  if (currentPrice > sma20 && sma20 > sma50) trend = 'Bullish';\n  else if (currentPrice < sma20 && sma20 < sma50) trend = 'Bearish';\n}\n\n// 5. RSI Signal\nlet rsiSignal = 'Neutral';\nif (rsi > 70) rsiSignal = 'Overbought';\nelse if (rsi < 30) rsiSignal = 'Oversold';\n\n// 6. Output Final\nconst analysis = {\n  stockSymbol: result.meta.symbol,\n  currentPrice: currentPrice,\n  historicalPrices: cleanPrices,\n  movingAverages: {\n    sma20: sma20.toFixed(2),\n    sma50: sma50.toFixed(2),\n    sma200: sma200.toFixed(2)\n  },\n  rsi: rsi.toFixed(2),\n  rsiSignal: rsiSignal,\n  volumeTrend: {\n    current: curVol,\n    percentChange: volChange + '%',\n    signal: volChange > 50 ? 'High Volume' : 'Normal'\n  },\n  // AICI ADĂUGĂM DATELE CARE LIPSEAU:\n  supportLevels: [support.toFixed(2)], \n  resistanceLevels: [resistance.toFixed(2)],\n  \n  overallTrend: trend,\n  timestamp: new Date().toISOString()\n};\n\nreturn [{ json: analysis }];"
+      },
+      "id": "ad2f632c-291f-4ed4-b73e-c21d10706ad5",
+      "name": "Analyze Stock Trends1",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        208,
+        1200
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Predict Future Trends using Simple Linear Regression\n// This code analyzes historical stock data and generates buy/sell/hold recommendations\n\nconst items = $input.all();\n\n// Helper function to perform simple linear regression\nfunction linearRegression(data) {\n  const n = data.length;\n  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;\n  \n  data.forEach((point, index) => {\n    const x = index;\n    const y = point;\n    sumX += x;\n    sumY += y;\n    sumXY += x * y;\n    sumX2 += x * x;\n  });\n  \n  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);\n  const intercept = (sumY - slope * sumX) / n;\n  \n  return { slope, intercept };\n}\n\n// Helper function to predict future values\nfunction predictFuture(regression, currentIndex, daysAhead) {\n  const predictions = [];\n  for (let i = 1; i <= daysAhead; i++) {\n    const futureIndex = currentIndex + i;\n    const predictedValue = regression.slope * futureIndex + regression.intercept;\n    predictions.push(predictedValue);\n  }\n  return predictions;\n}\n\n// Helper function to generate recommendation\nfunction generateRecommendation(slope, predictions, currentPrice) {\n  const avgPrediction = predictions.reduce((a, b) => a + b, 0) / predictions.length;\n  const priceChange = ((avgPrediction - currentPrice) / currentPrice) * 100;\n  \n  let recommendation = 'HOLD';\n  let confidence = 'Medium';\n  \n  if (slope > 0 && priceChange > 5) {\n    recommendation = 'BUY';\n    confidence = priceChange > 10 ? 'High' : 'Medium';\n  } else if (slope < 0 && priceChange < -5) {\n    recommendation = 'SELL';\n    confidence = priceChange < -10 ? 'High' : 'Low';\n  }\n  \n  return { recommendation, confidence, priceChange: priceChange.toFixed(2) };\n}\n\n// Process each item\nconst results = items.map(item => {\n  const stockData = item.json;\n  \n  // Extract historical prices (assuming they're in the data)\n  const historicalPrices = stockData.historicalPrices || [];\n  const currentPrice = stockData.currentPrice || historicalPrices[historicalPrices.length - 1];\n  \n  // Perform linear regression\n  const regression = linearRegression(historicalPrices);\n  \n  // Predict next 7 days\n  const predictions = predictFuture(regression, historicalPrices.length - 1, 7);\n  \n  // Generate recommendation\n  const analysis = generateRecommendation(regression.slope, predictions, currentPrice);\n  \n  return {\n    json: {\n      ...stockData,\n      prediction: {\n        trend: regression.slope > 0 ? 'Upward' : regression.slope < 0 ? 'Downward' : 'Stable',\n        slope: regression.slope.toFixed(4),\n        predictions: predictions.map(p => p.toFixed(2)),\n        recommendation: analysis.recommendation,\n        confidence: analysis.confidence,\n        expectedPriceChange: analysis.priceChange + '%',\n        currentPrice: currentPrice,\n        predictedPrice7Days: predictions[6].toFixed(2)\n      }\n    }\n  };\n});\n\nreturn results;"
+      },
+      "id": "a2a036e0-795f-4239-97a6-ab2e6e445037",
+      "name": "Predict Future Trends1",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        400,
+        1200
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "message",
+              "type": "string",
+              "value": "=📊 **Stock Analysis Report**\n\n**Symbol:** {{ $json.rawData.technical.stockSymbol }}\n**Current Price:** ${{ $json.rawData.technical.currentPrice }}\n**Timestamp:** {{ $json.rawData.technical.timestamp }}\n\n━━━━━━━━━━━━━━━━━━━━\n📈 **Technical Analysis**\n━━━━━━━━━━━━━━━━━━━━\n\n**Moving Averages:**\n• SMA 20: ${{ $json.rawData.technical.movingAverages.sma20 }}\n• SMA 50: ${{ $json.rawData.technical.movingAverages.sma50 }}\n• SMA 200: ${{ $json.rawData.technical.movingAverages.sma200 }}\n\n**RSI (14):** {{ $json.rawData.technical.rsi }} - {{ $json.rawData.technical.rsiSignal }}\n\n**Volume Analysis:**\n• Current: {{ $json.rawData.technical.volumeTrend.current }}\n• Change: {{ $json.rawData.technical.volumeTrend.percentChange }}\n• Signal: {{ $json.rawData.technical.volumeTrend.signal }}\n\n**Support Levels:** {{ $json.rawData.technical.supportLevels.join(', ') }}\n**Resistance Levels:** {{ $json.rawData.technical.resistanceLevels.join(', ') }}\n\n**Overall Trend:** {{ $json.rawData.technical.overallTrend }}\n\n━━━━━━━━━━━━━━━━━━━━\n🔮 **Price Prediction**\n━━━━━━━━━━━━━━━━━━━━\n\n**Trend Direction:** {{ $json.rawData.technical.prediction.trend }}\n**Slope:** {{ $json.rawData.technical.prediction.slope }}\n**7-Day Forecast:** ${{ $json.rawData.technical.prediction.predictedPrice7Days }}\n**Expected Change:** {{ $json.rawData.technical.prediction.expectedPriceChange }}\n\n━━━━━━━━━━━━━━━━━━━━\n📰 **News Sentiment**\n━━━━━━━━━━━━━━━━━━━━\n**Score:** {{ $json.rawData.news.sentimentScore || $json.rawData.news.score || 'N/A' }}\n**Summary:** {{ $json.rawData.news.summary || $json.rawData.news.sentimentSummary || 'No news summary available' }}\n\n━━━━━━━━━━━━━━━━━━━━\n👔 **Analyst Ratings**\n━━━━━━━━━━━━━━━━━━━━\n**Consensus:** {{ $json.rawData.analyst.analystRatings.consensus.rating }}\n**Buy:** {{ $json.rawData.analyst.analystRatings.summary.buyPercent }} | **Sell:** {{ $json.rawData.analyst.analystRatings.summary.sellPercent }}\n**Total Analysts:** {{ $json.rawData.analyst.analystRatings.summary.totalAnalysts }}\n\n━━━━━━━━━━━━━━━━━━━━\n💬 **Social Media Sentiment**\n━━━━━━━━━━━━━━━━━━━━\n**Mood:** {{ $json.rawData.social.communityMood }}\n**Score:** {{ $json.rawData.social.sentimentScore }}\n**Posts Analyzed:** {{ $json.rawData.social.totalPosts }}\n\n━━━━━━━━━━━━━━━━━━━━\n🎯 **FINAL RECOMMENDATION**\n━━━━━━━━━━━━━━━━━━━━\n\n**Action:** {{ $json.recommendation }}\n**Confidence Score:** {{ $json.confidenceScore }}%\n\n**Summary:**\n{{ $json.summary }}\n\n━━━━━━━━━━━━━━━━━━━━\n⚠️ *Disclaimer: This is automated analysis for informational purposes only. Always do your own research before making investment decisions.*"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d77d27f8-fcb3-4597-b0b2-8fd31f222767",
+      "name": "Format Telegram Message1",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1792,
+        1664
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Workflow Configuration1').first().json.analystRatingsApiUrl }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.stockSymbol }}"
+            },
+            {
+              "name": "token",
+              "value": "=d5m4blpr01qidp4js3l0d5m4blpr01qidp4js3lg"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "220f1f5f-a695-4f4d-8338-76b2242ac151",
+      "name": "Fetch Analyst Ratings1",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        240,
+        1664
+      ],
+      "typeVersion": 4.3,
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze News Sentiment (Yahoo Finance RSS Version)\nconst items = $input.all();\n\n// Verificăm dacă avem știri\nif (!items || items.length === 0) {\n  return [{ json: { score: 0, summary: \"No news found\", sentimentSummary: \"Neutral\" } }];\n}\n\nlet score = 0;\nlet validArticles = 0;\n\n// Cuvinte cheie pentru sentiment (Listă extinsă)\nconst positiveWords = ['gain', 'up', 'buy', 'bull', 'profit', 'rise', 'growth', 'high', 'surge', 'record', 'beat', 'strong'];\nconst negativeWords = ['loss', 'down', 'sell', 'bear', 'drop', 'crash', 'weak', 'low', 'miss', 'fall', 'cut', 'debt'];\n\n// Yahoo returnează titlul în 'title' și descrierea în 'contentSnippet'\n// Analizăm ultimele 10 articole pentru a prinde pulsul pieței\nconst recentArticles = items.slice(0, 10);\n\nrecentArticles.forEach(item => {\n  const title = (item.json.title || \"\").toLowerCase();\n  const desc = (item.json.contentSnippet || \"\").toLowerCase();\n  const fullText = title + \" \" + desc;\n  \n  let articleScore = 0;\n  \n  positiveWords.forEach(w => { if (fullText.includes(w)) articleScore += 1; });\n  negativeWords.forEach(w => { if (fullText.includes(w)) articleScore -= 1; });\n  \n  score += articleScore;\n  validArticles++;\n});\n\n// Normalizăm scorul (-1 la 1)\n// Împărțim la numărul de articole * un factor de amortizare\nconst normalizedScore = validArticles > 0 ? Math.max(-1, Math.min(1, score / (validArticles * 1.5))) : 0;\n\nlet mood = 'Neutral';\nif (normalizedScore > 0.15) mood = 'Bullish';\nif (normalizedScore < -0.15) mood = 'Bearish';\n\nreturn [{\n  json: {\n    sentimentScore: normalizedScore.toFixed(2),\n    summary: `${mood} sentiment based on Yahoo Finance stories.`,\n    overallSentiment: mood,\n    // Variabile critice pentru nodul final\n    score: normalizedScore.toFixed(2), \n    sentimentSummary: `${mood} (${normalizedScore.toFixed(2)})`\n  }\n}];"
+      },
+      "id": "2a7aa91b-9145-48df-824c-d1d3495d5acf",
+      "name": "Analyze News Sentiment1",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        400,
+        1392
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process Analyst Ratings (Fixed for Scoring)\nconst items = $input.all();\n\n// 1. Verificăm datele (Finnhub)\nif (!items || items.length === 0 || !items[0].json) {\n  return [{ json: { analystRatings: { consensus: { rating: 'N/A' } }, buyRatio: 0, sellRatio: 0 } }];\n}\n\n// Finnhub poate returna array sau obiect\nconst data = Array.isArray(items[0].json) ? items[0].json[0] : items[0].json;\n\nif (!data) {\n   return [{ json: { error: \"No ratings data found\", buyRatio: 0, sellRatio: 0 } }];\n}\n\n// 2. Extragem Cifrele\nconst buy = data.buy || 0;\nconst strongBuy = data.strongBuy || 0;\nconst hold = data.hold || 0;\nconst sell = data.sell || 0;\nconst strongSell = data.strongSell || 0;\n\nconst totalBuy = buy + strongBuy;\nconst totalSell = sell + strongSell;\nconst total = totalBuy + hold + totalSell;\n\n// 3. Calculăm Rațiile (Aici era problema - le calculăm ca numere simple 0.x)\nconst buyRatio = total > 0 ? (totalBuy / total) : 0;\nconst sellRatio = total > 0 ? (totalSell / total) : 0;\n\n// Calculăm Consensul\nlet consensus = 'Hold';\nif (total > 0) {\n  if (totalBuy > totalSell && totalBuy > hold) consensus = 'Buy';\n  if (totalSell > totalBuy && totalSell > hold) consensus = 'Sell';\n}\n\n// 4. Returnăm obiectul în formatul pe care îl așteaptă ȘI Telegram, ȘI Calculatorul de Scor\nreturn [{\n  json: {\n    // Acestea 2 sunt pentru nodul \"Generate Comprehensive Recommendation\"\n    buyRatio: buyRatio,\n    sellRatio: sellRatio,\n    \n    // Acesta este pentru afișarea textului frumos\n    analystRatings: {\n      summary: {\n        totalAnalysts: total,\n        buyRatings: totalBuy,\n        holdRatings: hold,\n        sellRatings: totalSell,\n        buyPercent: (buyRatio * 100).toFixed(0) + '%',\n        sellPercent: (sellRatio * 100).toFixed(0) + '%'\n      },\n      consensus: {\n        rating: consensus,\n        confidence: total > 10 ? 'High' : 'Medium'\n      },\n      timestamp: new Date().toISOString()\n    }\n  }\n}];"
+      },
+      "id": "241bef99-b0ab-4473-a251-92d11f1c7fa0",
+      "name": "Process Analyst Ratings1",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        432,
+        1680
+      ],
+      "typeVersion": 2,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Analyze Social Sentiment (RSS Version)\nconst items = $input.all();\n\n// Dacă RSS-ul nu a găsit nimic\nif (!items || items.length === 0) {\n  return [{ json: { sentimentScore: 0, communityMood: 'Neutral', totalPosts: 0, sentiment: 'Neutral' } }];\n}\n\nlet totalSentiment = 0;\nlet postCount = 0;\n\n// Analizăm titlurile din RSS\nitems.forEach(item => {\n  const title = item.json.title || \"\";\n  const snippet = item.json.contentSnippet || \"\";\n  const text = (title + \" \" + snippet).toLowerCase();\n  \n  // Cuvinte cheie simple\n  if (text.includes('bull') || text.includes('buy') || text.includes('moon') || text.includes('up')) totalSentiment++;\n  if (text.includes('bear') || text.includes('sell') || text.includes('crash') || text.includes('drop')) totalSentiment--;\n  \n  postCount++;\n});\n\n// Calculăm media\nconst avg = postCount > 0 ? totalSentiment / postCount : 0;\nlet mood = 'Neutral';\nif (avg > 0.1) mood = 'Bullish';\nif (avg < -0.1) mood = 'Bearish';\n\n// Returnăm UN SINGUR obiect rezumat (esențial pentru nodul Combine!)\nreturn [{\n  json: {\n    sentimentScore: avg.toFixed(2),\n    communityMood: mood,\n    totalPosts: postCount,\n    sentiment: mood\n  }\n}];"
+      },
+      "id": "2e2a29a5-fc4a-47c8-9e0e-e17685f9d79d",
+      "name": "Analyze Social Sentiment1",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        448,
+        1872
+      ],
+      "typeVersion": 2,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "id": "5669cf1e-1eaa-4361-8981-1cea8c448f4b",
+      "name": "Combine All Analysis1",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        656,
+        1632
+      ],
+      "typeVersion": 3.2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate Comprehensive Recommendation (Fixed Labels & Syntax)\nconst items = $input.all();\n\nif (!items || items.length === 0) {\n  return [{ json: { error: 'No data available for analysis' } }];\n}\n\n// Extragem datele de la cele 4 surse\nconst technicalAnalysis = items[0]?.json || {};\nconst newsSentiment = items[1]?.json || {};\nconst analystRatings = items[2]?.json || {};\nconst socialSentiment = items[3]?.json || {};\n\n// Definim ponderile (Cât contează fiecare)\nconst WEIGHTS = {\n  technical: 0.35,\n  news: 0.25,\n  analyst: 0.25,\n  social: 0.15\n};\n\n// Funcție de calcul scor (-100 la 100)\nfunction convertToScore(data, type) {\n  let score = 0;\n  \n  switch(type) {\n    case 'technical':\n      if (data.overallTrend === 'Bullish') score += 40;\n      else if (data.overallTrend === 'Bearish') score -= 40;\n      \n      if (data.rsiSignal === 'Oversold') score += 30;\n      else if (data.rsiSignal === 'Overbought') score -= 30;\n      \n      if (data.prediction?.recommendation === 'BUY') score += 30;\n      else if (data.prediction?.recommendation === 'SELL') score -= 30;\n      break;\n      \n    case 'news':\n      // Yahoo News dă un scor -1 la 1\n      const newsScore = parseFloat(data.sentimentScore || 0);\n      score = newsScore * 100; \n      break;\n      \n    case 'analyst':\n      // Finnhub dă rații 0 la 1\n      const buyRatio = data.buyRatio || 0;\n      const sellRatio = data.sellRatio || 0;\n      score = (buyRatio - sellRatio) * 100;\n      break;\n      \n    case 'social':\n      // Reddit\n      const socialScore = parseFloat(data.sentimentScore || 0);\n      score = socialScore * 100;\n      break;\n  }\n  \n  return Math.max(-100, Math.min(100, score));\n}\n\n// Calculăm scorurile individuale\nconst technicalScore = convertToScore(technicalAnalysis, 'technical');\nconst newsScore = convertToScore(newsSentiment, 'news');\nconst analystScore = convertToScore(analystRatings, 'analyst');\nconst socialScore = convertToScore(socialSentiment, 'social');\n\n// Calculăm scorul final compus\nconst compositeScore = (\n  technicalScore * WEIGHTS.technical +\n  newsScore * WEIGHTS.news +\n  analystScore * WEIGHTS.analyst +\n  socialScore * WEIGHTS.social\n);\n\n// Determinăm Recomandarea Finală\nlet recommendation = 'HOLD';\nlet confidence = 'Medium';\n\nif (compositeScore > 40) {\n  recommendation = 'STRONG BUY';\n  confidence = 'High';\n} else if (compositeScore > 20) {\n  recommendation = 'BUY';\n  confidence = 'Medium';\n} else if (compositeScore < -40) {\n  recommendation = 'STRONG SELL';\n  confidence = 'High';\n} else if (compositeScore < -20) {\n  recommendation = 'SELL';\n  confidence = 'Medium';\n} else {\n  recommendation = 'HOLD';\n  confidence = compositeScore > -10 && compositeScore < 10 ? 'High' : 'Medium';\n}\n\n// Extragem etichetele corecte pentru text\nconst techTrend = technicalAnalysis.overallTrend || 'Neutral';\nconst newsMood = newsSentiment.overallSentiment || newsSentiment.sentiment || 'Neutral';\n// Verificare extra pentru analystConsensus ca să nu dea eroare dacă lipsește structura\nconst analystConsensus = (analystRatings.analystRatings && analystRatings.analystRatings.consensus) ? analystRatings.analystRatings.consensus.rating : 'N/A';\nconst socialMood = socialSentiment.communityMood || socialSentiment.sentiment || 'Neutral';\n\n// Generăm textul rezumat\nconst summaryText = `\nBased on comprehensive analysis:\n- Technical Analysis: ${techTrend} (Score: ${technicalScore.toFixed(0)})\n- News Sentiment: ${newsMood} (Score: ${newsScore.toFixed(0)})\n- Analyst Ratings: ${analystConsensus} (Score: ${analystScore.toFixed(0)})\n- Social Sentiment: ${socialMood} (Score: ${socialScore.toFixed(0)})\n\nComposite Score: ${compositeScore.toFixed(2)}/100\n`;\n\n// Returnăm rezultatul final\nreturn [{\n  json: {\n    recommendation: recommendation,\n    confidence: confidence,\n    confidenceScore: Math.abs(compositeScore).toFixed(2),\n    compositeScore: compositeScore.toFixed(2),\n    summary: summaryText,\n    timestamp: new Date().toISOString(),\n    // Păstrăm datele brute pentru Discord\n    rawData: {\n      technical: technicalAnalysis,\n      news: newsSentiment,\n      analyst: analystRatings,\n      social: socialSentiment\n    }\n  }\n}];"
+      },
+      "id": "9d8402b3-d413-400a-b490-eb33797f9b25",
+      "name": "Generate Comprehensive Recommendation1",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        816,
+        1664
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "7a839843-2b51-4202-b876-039962060a41",
+      "name": "Google Gemini Model1",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "position": [
+        1248,
+        2304
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "chatInput",
+              "type": "string",
+              "value": "=You are a financial analysis validator. Review the following stock analysis recommendation and provide your independent assessment. Analyze the data objectively and determine if you agree or disagree with the recommendation. Provide your reasoning.\n\nStock Symbol: {{ $json.rawData.technical.stockSymbol }}\nCurrent Price: ${{ $json.rawData.technical.currentPrice }}\n\nRecommendation: {{ $json.recommendation }}\nConfidence: {{ $json.confidence }}\nComposite Score: {{ $json.compositeScore }}\n\nTechnical Analysis:\n- Trend: {{ $json.rawData.technical.overallTrend }}\n- RSI: {{ $json.rawData.technical.rsi }} ({{ $json.rawData.technical.rsiSignal }})\n- Moving Averages: SMA20=${{ $json.rawData.technical.movingAverages.sma20 }}, SMA50=${{ $json.rawData.technical.movingAverages.sma50 }}\n\nNews Sentiment: {{ $json.rawData.news.overallSentiment }} (Score: {{ $json.rawData.news.sentimentScore }})\nAnalyst Ratings: {{ $json.rawData.analyst.analystRatings.consensus.rating }}\nSocial Sentiment: {{ $json.rawData.social.communityMood }}\n\nProvide your verdict in this format:\nVERDICT: [AGREE/DISAGREE/NEUTRAL]\nCONFIDENCE: [High/Medium/Low]\nREASONING: [Your detailed analysis]"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "36a15693-4023-4906-a7ab-c180284ce8ca",
+      "name": "Prepare AI Validation Input1",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        1008,
+        1872
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "jsCode": "// Evaluate AI Consensus (Gemini Text Parser Fixed)\nconst items = $input.all();\n\n// 1. Luăm recomandarea originală (pe care Gemini a analizat-o)\n// Trebuie să accesăm datele din nodul care a generat semnalul inițial\nconst originalData = $('Generate Comprehensive Recommendation1').first().json;\nconst originalRec = originalData.recommendation || 'HOLD';\n\n// 2. Extragem textul generat de Gemini\nif (!items || items.length === 0 || !items[0].json.text) {\n  return [{ json: { error: 'No response from Gemini' } }];\n}\nconst geminiText = items[0].json.text;\n\n// 3. Funcție care caută Verdictul și Încrederea în text\nfunction extractValue(text, key) {\n  // Caută ceva de genul \"VERDICT: [AGREE]\" sau \"VERDICT: AGREE\"\n  const regex = new RegExp(`${key}:\\\\s*(?:\\\\[)?([^\\\\]\\\\n]+)(?:\\\\])?`, 'i');\n  const match = text.match(regex);\n  return match ? match[1].trim().toUpperCase() : 'NEUTRAL';\n}\n\nconst verdict = extractValue(geminiText, 'VERDICT'); \nconst confidenceStr = extractValue(geminiText, 'CONFIDENCE');\n\n// 4. Transformăm textul în cifre\nlet confidenceScore = 0;\nif (confidenceStr.includes('HIGH')) confidenceScore = 95;\nelse if (confidenceStr.includes('MEDIUM')) confidenceScore = 60;\nelse if (confidenceStr.includes('LOW')) confidenceScore = 30;\nelse confidenceScore = 0;\n\n// 5. Interpretăm Verdictul (AGREE = Păstrăm semnalul, DISAGREE = Trecem pe HOLD)\nlet finalRec = 'HOLD';\nif (verdict.includes('AGREE')) {\n    finalRec = originalRec;\n} else if (verdict.includes('DISAGREE')) {\n    finalRec = 'HOLD (Validator Disagreed)';\n} else {\n    finalRec = originalRec; // Dacă e neutru, păstrăm originalul\n}\n\n// 6. Construim pachetul final pentru Discord\nconst result = {\n  consensusRecommendation: finalRec,\n  consensusScore: confidenceScore,\n  agreementLevel: verdict.includes('AGREE') ? 'Validated' : 'Dispute',\n  averageConfidence: confidenceScore.toFixed(2),\n  \n  // Lista de validatori (Aici e doar Gemini acum)\n  aiRecommendations: [{\n    model: 'Gemini Ultra',\n    recommendation: verdict, // Arată dacă a fost de acord sau nu\n    confidence: confidenceStr\n  }],\n  \n  summary: `Gemini Analysis: ${verdict} with the initial signal. Confidence level is ${confidenceStr}.`,\n  timestamp: new Date().toISOString()\n};\n\nreturn [{ json: result }];"
+      },
+      "id": "d14f1907-7d17-4007-a3cc-b1f2fbfaa072",
+      "name": "Evaluate AI Consensus1",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1632,
+        1872
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "batching": {}
+      },
+      "id": "f408390c-0062-45bf-bdd5-c4333c0b1023",
+      "name": "AI Validator 3 - Gemini1",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "position": [
+        1248,
+        2048
+      ],
+      "typeVersion": 1.7
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "guildId": {
+          "__rl": true,
+          "value": "1462396100165243048",
+          "mode": "id"
+        },
+        "channelId": {
+          "__rl": true,
+          "value": "1462403921527046215",
+          "mode": "id"
+        },
+        "content": "={{ $json.message }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        2032,
+        1664
+      ],
+      "id": "53463572-74de-4e87-8a1d-3738cfa85191",
+      "name": "Send a message2",
+      "webhookId": "60f40ee7-e106-474f-83cc-9a8426deff41",
+      "credentials": {
+        "discordBotApi": {
+          "id": "ZQL9MvvHi103Avgx",
+          "name": "Discord Bot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "guildId": {
+          "__rl": true,
+          "value": "1462396100165243048",
+          "mode": "id"
+        },
+        "channelId": {
+          "__rl": true,
+          "value": "1462403921527046215",
+          "mode": "id"
+        },
+        "content": "={{ $('AI Consensus1').item.json.message }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        2080,
+        1888
+      ],
+      "id": "2a8f7277-bcc4-43e1-a27a-62e5fe8762f9",
+      "name": "Send a message3",
+      "webhookId": "60f40ee7-e106-474f-83cc-9a8426deff41",
+      "credentials": {
+        "discordBotApi": {
+          "id": "ZQL9MvvHi103Avgx",
+          "name": "Discord Bot account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a7072584-ccb9-4bdf-8784-c45fff109840",
+              "name": "message",
+              "value": "=🤖 **AI Consensus Validation**\n\n**Final Verdict:** {{ $json.consensusRecommendation }}\n**Agreement Level:** {{ $json.agreementLevel }}\n**Avg Confidence:** {{ $json.averageConfidence }}%\n\n━━━━━━━━━━━━━━━━━━━━\n🧠 **Model Breakdown**\n━━━━━━━━━━━━━━━━━━━━\n{{ $json.aiRecommendations.map(r => `• **${r.model}:** ${r.recommendation} (Conf: ${r.confidence})`).join('\\n') }}\n\n━━━━━━━━━━━━━━━━━━━━\n📝 **Summary**\n{{ $json.summary }}\n\n━━━━━━━━━━━━━━━━━━━━\n🕒 *Validated at:* {{ $json.timestamp }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1840,
+        1888
+      ],
+      "id": "290b0e9e-500c-4a68-8242-4836a4ffa0f1",
+      "name": "AI Consensus1"
+    },
+    {
+      "parameters": {
+        "url": "=https://finance.yahoo.com/rss/headline?s={{ $json.stockSymbol }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        208,
+        1392
+      ],
+      "id": "ad93814a-7e6d-4e2b-b72b-b17aa779d445",
+      "name": "News1",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "=https://www.reddit.com/r/stocks/search.rss?q={{ $json.stockSymbol }}&restrict_sr=1&sort=new&limit=20",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        1856
+      ],
+      "id": "7961473b-1369-446c-85a6-ea9ca05a7d6c",
+      "name": "Reddit1",
+      "alwaysOutputData": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Fetch Stock Data": {
+      "main": [
+        [
+          {
+            "node": "Analyze Stock Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Stock Check": {
+      "main": [
+        [
+          {
+            "node": "My List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Validator 3 - Gemini",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Stock Trends": {
+      "main": [
+        [
+          {
+            "node": "Predict Future Trends",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine All Analysis": {
+      "main": [
+        [
+          {
+            "node": "Generate Comprehensive Recommendation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate AI Consensus": {
+      "main": [
+        [
+          {
+            "node": "AI Consensus",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Analyst Ratings": {
+      "main": [
+        [
+          {
+            "node": "Process Analyst Ratings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Predict Future Trends": {
+      "main": [
+        [
+          {
+            "node": "Combine All Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze News Sentiment": {
+      "main": [
+        [
+          {
+            "node": "Combine All Analysis",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Workflow Configuration": {
+      "main": [
+        [
+          {
+            "node": "Fetch Stock Data",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Analyst Ratings",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Reddit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Validator 3 - Gemini": {
+      "main": [
+        [
+          {
+            "node": "Evaluate AI Consensus",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Analyst Ratings": {
+      "main": [
+        [
+          {
+            "node": "Combine All Analysis",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Analyze Social Sentiment": {
+      "main": [
+        [
+          {
+            "node": "Combine All Analysis",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Prepare AI Validation Input": {
+      "main": [
+        [
+          {
+            "node": "AI Validator 3 - Gemini",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Comprehensive Recommendation": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare AI Validation Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Consensus": {
+      "main": [
+        [
+          {
+            "node": "Send a message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many messages": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "My List": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Workflow Configuration1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "News": {
+      "main": [
+        [
+          {
+            "node": "Analyze News Sentiment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reddit": {
+      "main": [
+        [
+          {
+            "node": "Analyze Social Sentiment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Workflow Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get many messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Configuration1": {
+      "main": [
+        [
+          {
+            "node": "Fetch Stock Data1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Analyst Ratings1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Reddit1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "News1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Stock Data1": {
+      "main": [
+        [
+          {
+            "node": "Analyze Stock Trends1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Stock Trends1": {
+      "main": [
+        [
+          {
+            "node": "Predict Future Trends1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Predict Future Trends1": {
+      "main": [
+        [
+          {
+            "node": "Combine All Analysis1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Message1": {
+      "main": [
+        [
+          {
+            "node": "Send a message2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Analyst Ratings1": {
+      "main": [
+        [
+          {
+            "node": "Process Analyst Ratings1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze News Sentiment1": {
+      "main": [
+        [
+          {
+            "node": "Combine All Analysis1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Process Analyst Ratings1": {
+      "main": [
+        [
+          {
+            "node": "Combine All Analysis1",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Analyze Social Sentiment1": {
+      "main": [
+        [
+          {
+            "node": "Combine All Analysis1",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Combine All Analysis1": {
+      "main": [
+        [
+          {
+            "node": "Generate Comprehensive Recommendation1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Comprehensive Recommendation1": {
+      "main": [
+        [
+          {
+            "node": "Format Telegram Message1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare AI Validation Input1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Validator 3 - Gemini1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Validation Input1": {
+      "main": [
+        [
+          {
+            "node": "AI Validator 3 - Gemini1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate AI Consensus1": {
+      "main": [
+        [
+          {
+            "node": "AI Consensus1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Validator 3 - Gemini1": {
+      "main": [
+        [
+          {
+            "node": "Evaluate AI Consensus1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Consensus1": {
+      "main": [
+        [
+          {
+            "node": "Send a message3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "News1": {
+      "main": [
+        [
+          {
+            "node": "Analyze News Sentiment1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reddit1": {
+      "main": [
+        [
+          {
+            "node": "Analyze Social Sentiment1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e95901cc-598f-4275-b5ee-a8d4fb546615",
+  "meta": {
+    "instanceId": "1e5ac907b955cebb5d932d339eddf8d0f829ea0f2ce5fabd9c0144d3f114a79b"
+  },
+  "id": "qGzgt74JyRuuGoqs",
+  "tags": []
+}
